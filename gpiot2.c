@@ -1,17 +1,13 @@
 #include <linux/init.h>
 #include <linux/module.h>
-
 #include <linux/delay.h>
-
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/machine.h>  //to use GPIO_LOOKUP
-
 #include <linux/miscdevice.h>  //misc_register
-
 #include <linux/fs.h>  //fops
-
 #include <linux/irqflags.h>
-
+#include <linux/timekeeping.h>  //ktime_get_ns
+#include <linux/math64.h>  //РґРµР»РµРЅРёРµ u64
 
 #include "mydefs.h"
 #include "adr_map.h"
@@ -24,9 +20,96 @@
 
 MODULE_LICENSE("GPL");
 
+//=== Р¤СЂР°РіРјРµРЅС‚ РґР»СЏ РІРєР»РµР№РєРё
+
+#include <linux/gpio/consumer.h>
+#include <linux/gpio/machine.h>  //to use GPIO_LOOKUP
+
+static struct gpio_desc *t = NULL;
+
+void SetupGpio(void){
+  int ret;
+  t = gpio_to_desc(108);  //W2 (in)	1-wire/DI	GPIO4_IO12	108	A3
+  if (IS_ERR(t)){
+    pr_err("?Err gpiod_get %ld\n", PTR_ERR(t));
+
+  } else if (t == NULL){
+    pr_err("?Got NULL gpiod.\n");
+
+  } else{
+    pr_info("gpio get OK %p\n", t);
+    ret = gpiod_direction_output(t, 1);  //direction, initial value.
+  }
+
+}
+
+void mark0(void){
+  if (!t) SetupGpio();
+  gpiod_set_value(t, 0);
+
+}
+
+void mark1(void){
+  if (!t) SetupGpio();
+  gpiod_set_value(t, 1);
+
+}
+
+//===
+//=== Р¤СЂР°РіРјРµРЅС‚ 2
+
+#include <asm/io.h>  //ioremap
+
+static volatile u32 *gpio_dr = NULL;
+
+//РњР°СЃРєР°
+#define GPIO12 (1<<12)
+
+int SetupGpioReg(void)
+{
+  if(gpio_dr == NULL) {
+    gpio_dr = ioremap(0x20A8000, 4);
+    if(gpio_dr != NULL) {
+      pr_info("Remapped %p\n", gpio_dr);
+      return -EIO;
+    } else {
+      pr_err("Failed remap.\n");
+      return OK;
+    }
+  
+  }
+  return OK;
+}
+
+void unSetupGpio(void) {
+  if(gpio_dr) iounmap(gpio_dr);
+}
+
+void mark0Reg(void) 
+{
+  //Р‘СѓРґРµРј Р±С‹СЃС‚СЂРµРµ С‡РµРј writel.
+  *gpio_dr = (*gpio_dr) & ~GPIO12;
+}
+
+void mark1Reg(void)
+{
+  //Р‘СѓРґРµРј Р±С‹СЃС‚СЂРµРµ С‡РµРј writel.
+  *gpio_dr = (*gpio_dr) | GPIO12;
+}
+
+//===
+
+static int delayh=10, delayl=10, niter=100000;  //Р—Р°РґРµСЂР¶РєР° РІС‹СЃРѕРєРѕРіРѕ СѓСЂРѕРІРЅСЏ, РЅРёР·РєРѕРіРѕ СѓСЂРѕРІРЅСЏ, С‡РёСЃР»Рѕ РёС‚РµСЂР°С†РёР№ С†РёРєР»Р°.
+module_param(delayh, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+MODULE_PARM_DESC(delayh, "Delay high, usec");
+module_param(delayl, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+MODULE_PARM_DESC(delayl, "Delay low, usec");
+module_param(niter, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+MODULE_PARM_DESC(niter, "niter - number of iterations");
+
 static int device_open(struct inode *inode, struct file *file)
 {
-  //При открытии выделяем структуру SPrivateData и записываем ее в file->private_data
+  //РџСЂРё РѕС‚РєСЂС‹С‚РёРё РІС‹РґРµР»СЏРµРј СЃС‚СЂСѓРєС‚СѓСЂСѓ SPrivateData Рё Р·Р°РїРёСЃС‹РІР°РµРј РµРµ РІ file->private_data
   //void *privdata;
   ////prn("device_open(%p)\n", file);
   //privdata = kzalloc(sizeof(struct SPrivateData), GFP_KERNEL);
@@ -38,7 +121,7 @@ static int device_open(struct inode *inode, struct file *file)
 struct gpiod_lookup_table gpios_table = {
   .dev_id = "gpiotst.0",
   .table = {
-    GPIO_LOOKUP("gpio4", 12, "test", GPIOD_OUT_HIGH_OPEN_DRAIN),  //GPIO_ACTIVE_HIGH
+    GPIO_LOOKUP("gpio4", 12, "test", GPIO_ACTIVE_HIGH),  //was: GPIOD_OUT_HIGH_OPEN_DRAIN  GPIO_ACTIVE_HIGH
 //    GPIO_LOOKUP_IDX("gpio.0", 16, "led", 1, GPIO_ACTIVE_HIGH),
 //    GPIO_LOOKUP_IDX("gpio.0", 17, "led", 2, GPIO_ACTIVE_HIGH),
 //    GPIO_LOOKUP("gpio.0", 1, "power", GPIO_ACTIVE_LOW),
@@ -52,20 +135,21 @@ static const struct file_operations fops = {
   //.write = device_write,
   //.unlocked_ioctl = device_ioctl,
   .open = device_open,
-  //.release = device_close    /* оно же close */
+  //.release = device_close    /* РѕРЅРѕ Р¶Рµ close */
 };
 
+#if 0
 static struct miscdevice mydev = {
   MISC_DYNAMIC_MINOR, DEVICENAME, &fops
 };
+#endif
 
 static int m_init(void)
 {
-  int ret;
-
-  struct gpio_desc *t;
 
 #if 0
+  int ret;
+
   //See arch/x86/kernel/msr.c
   //arch/x86/kernel/cpuid.c
 
@@ -93,47 +177,96 @@ static int m_init(void)
     unregister_chrdev_region(myChrDevid, 1);
     return -1;
   }
-#endif
   
-  //Регистрация устройства как misc device.
+  //Р РµРіРёСЃС‚СЂР°С†РёСЏ СѓСЃС‚СЂРѕР№СЃС‚РІР° РєР°Рє misc device.
   ret = misc_register(&mydev);
   if (ret != OK){
     prnerr("?misc_register ret=%d\n", ret);
     return ERR;
   } else printk(KERN_INFO "Device created!\n");
+#endif
 
-
-  prn("Aquire gpio.\n");
+  int i;
+  u64 t1, t2; 
+  unsigned v;
 
   //gpiod_add_lookup_table(&gpios_table);
   //t = gpiod_get(mydev.this_device, "test", GPIOD_OUT_HIGH);  //TODO test
   //gpiod_get_index(dev, "led", 2, GPIOD_OUT_HIGH);
 
-  t = gpio_to_desc(108);  //W2 (in)	1-wire/DI	GPIO4_IO12	108	A3
+  pr_info("SetupGpio()\n");
 
-  if(IS_ERR(t)){
-    prn("?Err gpiod_get %ld\n", PTR_ERR(t));
-  }else if(t==NULL){
-    prn("?Got NULL gpiod.\n");
-  }else{
-    int i;
-    unsigned long flags;
-    prn("gpio get OK %p\n", t);
+  SetupGpio();
+  SetupGpioReg();
 
-    ret = gpiod_direction_output(t, 1);  //direction, initial value.
+  msleep(20);
 
-    msleep(200);
+  t1= ktime_get_ns();
+  //local_irq_save(flags);
+  for (i = 0; i < niter; i++){
+    mark1();
+    udelay(delayh);
+    mark0();
+    udelay(delayl);
+  }
+  //local_irq_restore(flags);
+  t2 = ktime_get_ns();
+  v = (unsigned)div_u64(t2 - t1, niter) / 2;
+  pr_info("giod_set_value + delay. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
 
-    //local_irq_save(flags);
-    for(i=0; i<100000; i++){
-      gpiod_set_value(t, 1);
-      udelay(10);
-      gpiod_set_value(t, 0);
-      udelay(10);
+  t1 = ktime_get_ns();
+  //local_irq_save(flags);
+  for (i = 0; i < niter; i++){
+    mark1Reg();
+    udelay(delayh);
+    mark0Reg();
+    udelay(delayl);
+  }
+  //local_irq_restore(flags);
+  t2 = ktime_get_ns();
+  v = (unsigned)div_u64(t2 - t1, niter) / 2;
+  pr_info("gio reg + delay. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+
+  t1 = ktime_get_ns();
+  //local_irq_save(flags);
+  for (i = 0; i < niter; i++){
+    mark1();
+    mark0();
+    mark1();
+    mark0();
+  }
+  //local_irq_restore(flags);
+  t2 = ktime_get_ns();
+  v = (unsigned)div_u64(t2 - t1, niter) / 4;
+  pr_info("giod_set_value. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+
+  t1 = ktime_get_ns();
+  //local_irq_save(flags);
+  for (i = 0; i < niter; i++){
+    mark1Reg();
+    mark0Reg();
+    mark1Reg();
+    mark0Reg();
+  }
+  //local_irq_restore(flags);
+  t2 = ktime_get_ns();
+  v = (unsigned)div_u64(t2 - t1, niter) / 4;
+  pr_info("giod reg. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+
+
+  t1 = ktime_get_ns();
+  {
+  volatile unsigned int j=0;
+
+    for (i = 0; i < niter; i++){
+      for (j = 0; j < 1000; j++);
     }
-    //local_irq_restore(flags);
 
   }
+  t2 = ktime_get_ns();
+  v = (unsigned)div_u64(t2 - t1, niter);
+  pr_info("Integer operations. niter %d, t1 %llx, t2 %llx, result [ns/1000] %d\n", niter, t1, t2, v);
+
 
   return OK;
 }
@@ -141,18 +274,22 @@ static int m_init(void)
 static void m_exit(void)
 {
   prn("m_exit\n");
+
+#if 0
   misc_deregister(&mydev);
+#endif
 }
 
 module_init(m_init);
 module_exit(m_exit);
-/***
-Результаты измерения задержек gpio с отдельным драйвером.
-Целевая задержка 10 мкс, реальная 13.0 высокий уровень, 12.92 низкий. Т.е. простой цикл, вызовы gpiod* и udelay вносят задержку около 3 мкс.
-Разрешенные прерывания: дырки на 56, 92 мкс, период прерываний порядка 9 мс: w2_gpiotst_bad_irqen.png
-Большие дырки по 50 мкс видны, а меньшей длины не встречаются, все ровно: w2_gpiotst_irqen_clear.png
 
-Запрещение прерываний через local_irq_save убирает дырки полностью.
+/***
+Р РµР·СѓР»СЊС‚Р°С‚С‹ РёР·РјРµСЂРµРЅРёСЏ Р·Р°РґРµСЂР¶РµРє gpio СЃ РѕС‚РґРµР»СЊРЅС‹Рј РґСЂР°Р№РІРµСЂРѕРј.
+Р¦РµР»РµРІР°СЏ Р·Р°РґРµСЂР¶РєР° 10 РјРєСЃ, СЂРµР°Р»СЊРЅР°СЏ 13.0 РІС‹СЃРѕРєРёР№ СѓСЂРѕРІРµРЅСЊ, 12.92 РЅРёР·РєРёР№. Рў.Рµ. РїСЂРѕСЃС‚РѕР№ С†РёРєР», РІС‹Р·РѕРІС‹ gpiod* Рё udelay РІРЅРѕСЃСЏС‚ Р·Р°РґРµСЂР¶РєСѓ РѕРєРѕР»Рѕ 3 РјРєСЃ.
+Р Р°Р·СЂРµС€РµРЅРЅС‹Рµ РїСЂРµСЂС‹РІР°РЅРёСЏ: РґС‹СЂРєРё РЅР° 56, 92 РјРєСЃ, РїРµСЂРёРѕРґ РїСЂРµСЂС‹РІР°РЅРёР№ РїРѕСЂСЏРґРєР° 9 РјСЃ: w2_gpiotst_bad_irqen.png
+Р‘РѕР»СЊС€РёРµ РґС‹СЂРєРё РїРѕ 50 РјРєСЃ РІРёРґРЅС‹, Р° РјРµРЅСЊС€РµР№ РґР»РёРЅС‹ РЅРµ РІСЃС‚СЂРµС‡Р°СЋС‚СЃСЏ, РІСЃРµ СЂРѕРІРЅРѕ: w2_gpiotst_irqen_clear.png
+
+Р—Р°РїСЂРµС‰РµРЅРёРµ РїСЂРµСЂС‹РІР°РЅРёР№ С‡РµСЂРµР· local_irq_save СѓР±РёСЂР°РµС‚ РґС‹СЂРєРё РїРѕР»РЅРѕСЃС‚СЊСЋ.
 
 
 

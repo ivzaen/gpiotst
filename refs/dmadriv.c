@@ -21,13 +21,15 @@
 //Структура присваивается полям file->private_data, которая для таких целей предназначена.
 //При дальнейших вызовах драйвера поле file->private_data кастится в SPrivateData*
 struct SPrivateData {
-	int a;
+  struct SMyDmaMemory ms; //Запрос от app. Здесь сохраняются нужные значения от Submit до Release
+  struct page **pdesc, **pdest;  //Массивы struct page* для дескрипторов и данных.
+  struct DmaDescSw *pswd;  //Программные дескрипторы ядра. Количество равно ms.dest_npage.
+  int nswd; //Количество элементов в pswd, копируется из ms.dest_npage.
 };
-
-#if 0
 
 //--- Прерывания
 atomic_t irq_mm2s_count = ATOMIC_INIT(0);  //Счетчик прерываний. See LDD3.pdf / Atomic Variables p.142.
+atomic_t irq_s2mm_count = ATOMIC_INIT(0);  //Счетчик прерываний
 
 ulong irq_mm2s_virt=0, irq_s2mm_virt=0;  //Виртуальные номера прерываний для вызова request_irq. Определяются относительно тех, что заданы в DTS.
 
@@ -55,7 +57,6 @@ irqreturn_t irq_s2mm_handler(int irq, void *dev_id){
   return IRQ_HANDLED;
 }
 
-#endif
 
 //Создать отображение физ. памяти в память ядра.
 //Через указатель access можно обращаться на чтение и запись к физ. памяти.
@@ -85,8 +86,6 @@ void IODeleteMapping(struct IOMAPPING *map){
     map->fMapOk=0; //deleted
   }
 }
-
-#if 0
 
 //==== Mytop. Должен быть сделан MCreateMapping.
 
@@ -375,6 +374,7 @@ long device_ioctl(struct file *file, unsigned int ioctl_num, unsigned long ioctl
   case IOCTL_GET_BUILDINFO:
     return BuildInfoFill((struct SBUILDINFO __user *)ioctl_param);
 
+
   default: return ENOTTY; //так положено.
   }
 }
@@ -391,17 +391,13 @@ static struct miscdevice mydev = {
   MISC_DYNAMIC_MINOR, DEVICENAME, &fops
 };
 
-#endif
-
 static int dmadriv_of_probe(struct platform_device *ofdev)
 {
-  pr_warn(" of_probe\n");
-
-#if 0
-
   struct resource *res;
   int n;
   int ret;
+
+  prn("of_probe\n");
 
   //Определяем виртуальные номера и устанавливаем обработчики прерываний.
   //расчет номера в 0notes/ ---Прерывания
@@ -430,6 +426,11 @@ static int dmadriv_of_probe(struct platform_device *ofdev)
     }
   }
 
+  if(PAGESIZEB!=PAGE_SIZE){
+    prnerr("?PAGESIZEB=%d but real PAGE_SIZE=%d.\n", (int)PAGESIZEB, (int)PAGE_SIZE);
+    return ERR;
+  }
+
   //if(platform_driver_register(&zynq_gpio_driver)!=OK){
   //  prnerr("?platform_driver_register\n");
   //  return ERR;
@@ -451,19 +452,38 @@ static int dmadriv_of_probe(struct platform_device *ofdev)
     return ERR;
   }
 
-#endif
+//AM - создаем каналы TX и RX
+  tx_chan = dma_request_slave_channel(&ofdev->dev, "dma-channel-s2mm");
+  //rx_chan = dma_request_slave_channel(&ofdev->dev, "dma-channel-mm2s");
 
-	return ERR;
-  //return OK;
+  if(!tx_chan)
+    prn("dma_request_slave_channel(dma-channel-s2mm) error\n");
+
+  return OK;
 }
 
 static int dmadriv_of_remove(struct platform_device *of_dev)
 {
   prn("of_remove\n");
 
-//  free_irq(irq_mm2s_virt, NULL);
+  free_irq(irq_mm2s_virt, NULL);
+  free_irq(irq_s2mm_virt, NULL);
 
-//  IODeleteMapping(&io_mytop);
+  IODeleteMapping(&io_mytop);
+  IODeleteMapping(&io_axi_dma);
+
+  misc_deregister( &mydev );
+
+  //AM - освобождаем каналы TX и RX
+  if(tx_chan)
+    {dma_release_channel(tx_chan);
+     tx_chan=NULL;
+    }
+
+  if(rx_chan)
+    {dma_release_channel(rx_chan);
+     rx_chan=NULL;
+    }
 
   return OK;
 }
@@ -473,7 +493,7 @@ static int dmadriv_of_remove(struct platform_device *of_dev)
 //===Соответствие драйвера узлу в DeviceTree
 
 static const struct of_device_id dmadriv_of_match[] = {
-  { .compatible = "wiren,gpiotst", },
+  { .compatible = "ircos,dmadriv", },
   {},  //end of list
 };
 MODULE_DEVICE_TABLE(of, dmadriv_of_match);
@@ -491,6 +511,6 @@ static struct platform_driver dmadriv_of_driver = {
 module_platform_driver(dmadriv_of_driver);
 
 MODULE_AUTHOR( "ivz" );
-MODULE_DESCRIPTION("GPIO test");
+MODULE_DESCRIPTION("AXI DMA MM2S and S2MM driver");
 MODULE_LICENSE("GPL v2");
-
+//MODULE_ALIAS("ircos:dmadriv");

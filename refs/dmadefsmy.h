@@ -11,8 +11,8 @@
 #define MJR MISC_MAJOR //misc_register регистрирует все с одним major=10.
 //Major обычно уникален для драйвера. Пара major,minor должна быть уникальна.
 //MNR не используется.
-#define DEVICENAME "gpiotst"  //Имя устройства для struct miscdevice и misc_register.
-#define DEVICEPATH "/dev/gpiotst"  //Имя special file для открытия в приложении
+#define DEVICENAME "dmadriv"  //Имя устройства для struct miscdevice и misc_register.
+#define DEVICEPATH "/dev/dmadriv"  //Имя special file для открытия в приложении
 
 //Буфер для работы с dma S2MM (потом и MM2S) из user app.
 struct SMyDmaMemory{

@@ -12,11 +12,16 @@ M_SRC=gpiot2.c supply_lkm.c
 #Из drivinclude.h
 M_INCL=drivinclude.h mydefs.h adr_map.h dmadefsmy.h supply.h supply_cmn.c
 
+CROSS_COMPILE=$CROSS
+
 
 #---Путь к ядру линукса
 #Задается в build agent environment  http://teamcity.ircoc.vrn.ru:8080/admin/editProject.html?projectId=T8Firmware&tab=projectParams
 #или здесь, если не задан на момент запуска.
-KERNPATH ?= ~/rep/imx_v6_v7-mainline-linux/KERNEL
+
+KERNPATH ?= ~/rep/linux-wk
+#KERNPATH ?= ~/rep/wiren/linux
+#KERNPATH ?= ~/rep/wiren/linux_merge_wiren
 
 #====== Вызов из командной строки, не из kbuild?
 ifndef KERNELRELEASE
@@ -34,6 +39,9 @@ CSIZE=$(CROSS)size
 
 $(M_NAME): $(M_SRC) $(M_INCL)
 	make -j8 ARCH=arm LOCALVERSION=ivz CROSS_COMPILE=$(CROSS) ccflags-y:="$(ADDRESS_CFLAGS)" -C $(KERNPATH) M=$(CURDIR) KBUILD_EXTMOD=$(CURDIR) modules
+
+clean:
+	rm -f *.mod .*.o.cmd .*ko.cmd *.mod.c *.order	rm -f *.ko *.a .*.symvers.cmd *.symvers .*.order.cmd .*.mod.cmd .*.o.d *.o
 
 else   # ====== Обратный вызов данного makefile из kbuild
 
