@@ -1,0 +1,1 @@
+/home/ivan/rep/wiren/build_kernel/vars.sh

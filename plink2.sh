@@ -1,11 +1,11 @@
 #!/bin/sh
 
 #Скрипт получает команду в кавычках в ком. строке - 1 параметр.
-#Если команд несколько, разделять их ; 
+#Если команд несколько, разделять их ;
 
+#Значения переменных по умолч. для psftp и plink
+. ./psvars.sh
 set -x
 
-[ -z "$BKEY" ] && BKEY="/home/ivan/my/sshkeys/zynq_root/id_rsa.ppk"
-
-plink wb6 -l root -i $BKEY -batch $1
+plink $TARGET $TPORT -l $TUSER -i $TKEY -batch $1
 

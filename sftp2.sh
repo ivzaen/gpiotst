@@ -6,14 +6,11 @@
 # put a.a \n
 # "
 
+. ./psvars.sh
+
 set -x
 
-TMPF=_sftp2.cmd
-
-[ -z "$BKEY" ] && BKEY="/home/ivan/my/sshkeys/zynq_root/id_rsa.ppk"
-
+TMPF=`mktemp`
 echo $1 > $TMPF
-
-psftp wb6 -l root -i $BKEY -be -b $TMPF
-
+psftp $TARGET $TPORT -l $TUSER -i $TKEY -be -b $TMPF
 rm $TMPF
