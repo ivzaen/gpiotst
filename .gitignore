@@ -1,0 +1,9 @@
+*.sdf
+*.old
+*.suo
+*.opensdf
+*.ncb
+*.suo
+*.orig
+*.vgdbsettings.ivz.user
+*.vcxproj.user
