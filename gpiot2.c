@@ -201,7 +201,7 @@ struct gpiod_lookup_table gpios_table = {
 };
 
 
-static const struct file_operations fops = { 
+static const struct file_operations fops = {
   //.read = device_read,
   //.write = device_write,
   //.unlocked_ioctl = device_ioctl,
@@ -215,8 +215,61 @@ static struct miscdevice mydev = {
 };
 #endif
 
+/**
+ * w1_DS18B20_convert_temp() - temperature computation for DS18B20
+ * @rom: data read from device RAM (8 data bytes + 1 CRC byte)
+ *
+ * Can be called for any DS18B20 compliant device.
+ *
+ * Return: value in millidegrees Celsius.
+ */
+static inline int w1_DS18B20_convert_temp(u8 rom[9])
+{
+	int t;
+	u32 bv;
+
+	/* Config register bit R2 = 1 - GX20MH01 in 13 or 14 bit resolution mode */
+	if (rom[4] & 0x80) {
+		/* Signed 16-bit value to unsigned, cpu order */
+		bv = le16_to_cpup((__le16 *)rom);
+
+		/* Insert two temperature bits from config register */
+		/* Avoid arithmetic shift of signed value */
+		bv = (bv << 2) | (rom[4] & 3);
+
+		t = (int) sign_extend32(bv, 17); /* Degrees, lowest bit is 2^-6 */
+		return (t*1000)/64;  /* Millidegrees */
+	}
+
+	t = (int)le16_to_cpup((__le16 *)rom);
+	return t*1000/16;
+}
+
+struct testram {
+	u8 ram[9];  //scratchpad ram
+	int temp;  //correct temp value
+};
+
 static int m_init(void)
 {
+        #define N 8
+	struct testram tram[N] = {
+		{ { 0xD0, 0x7, 0, 0, 0, 0, 0, 0, 0 }, 125000 },
+		{ { 0x50, 0x05, 0, 0, 0, 0, 0, 0, 0 }, 85000 },
+		{ { 0x91, 0x01, 0, 0, 0, 0, 0, 0, 0 }, 25062 },
+		{ { 0x8, 0x0, 0, 0, 0, 0, 0, 0, 0 }, 500 },
+	        { { 0xF8, 0xFF, 0, 0, 0, 0, 0, 0, 0 }, -500 },
+		{ { 0x5E, 0xFF, 0, 0, 0, 0, 0, 0, 0 }, -10125 },
+		{ { 0x6F, 0xFE, 0, 0, 0, 0, 0, 0, 0 }, -25062 },
+		{ { 0x90, 0xFC, 0, 0, 0, 0, 0, 0, 0 }, -55000 }
+	};
+	int i, v;
+	for(i=0; i<N; i++){
+		v = w1_DS18B20_convert_temp(tram[i].ram);
+		pr_info("conv i=%d temp=%d conv_temp=%d\n", i, tram[i].temp, v);
+	}
+
+
 
 #if 0
   int ret;
@@ -248,7 +301,7 @@ static int m_init(void)
     unregister_chrdev_region(myChrDevid, 1);
     return -1;
   }
-  
+
   //Регистрация устройства как misc device.
   ret = misc_register(&mydev);
   if (ret != OK){
@@ -257,8 +310,9 @@ static int m_init(void)
   } else printk(KERN_INFO "Device created!\n");
 #endif
 
+#if 0
   int i;
-  u64 t1, t2; 
+  u64 t1, t2;
   unsigned v;
 
   //gpiod_add_lookup_table(&gpios_table);
@@ -278,7 +332,7 @@ static int m_init(void)
 
   for(i=0; i<3; i++){
     udelay(20);
-  
+
     mark0RegB();
     mark1RegB();
 
@@ -290,6 +344,7 @@ static int m_init(void)
 
     udelay(20);
   }
+#endif
 
 #if 0
 
@@ -334,6 +389,7 @@ static int m_init(void)
 
 #endif
 
+#if 0
   t1 = ktime_get_ns();
   //local_irq_save(flags);
   for (i = 0; i < niter; i++){
@@ -384,6 +440,7 @@ static int m_init(void)
   pr_info("Integer operations. niter %d, t1 %llx, t2 %llx, result [ns/1000] %d\n", niter, t1, t2, v);
 
   unSetupGpio();
+#endif
 
   return OK;
 }
@@ -407,16 +464,4 @@ module_exit(m_exit);
 Большие дырки по 50 мкс видны, а меньшей длины не встречаются, все ровно: w2_gpiotst_irqen_clear.png
 
 Запрещение прерываний через local_irq_save убирает дырки полностью.
-
-
-
-
-
-
-
-
-
-
-
-
 ***/

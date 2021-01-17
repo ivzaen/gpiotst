@@ -11,7 +11,8 @@ M_INCL=drivinclude.h mydefs.h adr_map.h dmadefsmy.h supply.h supply_cmn.c
 #====== Вызов из командной строки, не из kbuild?
 ifndef KERNELRELEASE
 
-else   # ====== Обратный вызов данного makefile из kbuild
+else
+# ====== Обратный вызов данного makefile из kbuild
 
 #Имя модуля .ko не должно совпадать ни с одним из линкуемых c-шников из списка modname-y
 obj-m += $(M_NAME:.ko=.o)
