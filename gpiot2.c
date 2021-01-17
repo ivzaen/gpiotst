@@ -25,79 +25,150 @@ MODULE_LICENSE("GPL");
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/machine.h>  //to use GPIO_LOOKUP
 
-static struct gpio_desc *t = NULL;
+static struct gpio_desc *gpio_a = NULL, *gpio_b = NULL;
 
-void SetupGpio(void){
-  int ret;
-  t = gpio_to_desc(108);  //W2 (in)	1-wire/DI	GPIO4_IO12	108	A3
-  if (IS_ERR(t)){
-    pr_err("?Err gpiod_get %ld\n", PTR_ERR(t));
-
-  } else if (t == NULL){
-    pr_err("?Got NULL gpiod.\n");
-
+int SetupGpio(void){
+  int ret = OK;
+  gpio_a = gpio_to_desc(11);  //W1 (in)		1-wire/DI	GPIO1_IO11	11	P14
+  gpio_b = gpio_to_desc(108);  //W2 (in)	1-wire/DI	GPIO4_IO12	108	A3
+  if (IS_ERR(gpio_a) || IS_ERR(gpio_b)){
+    pr_err("?Err gpiod_get %ld\n", PTR_ERR(gpio_a));
+    pr_err("?Err gpiod_get %ld\n", PTR_ERR(gpio_b));
   } else{
-    pr_info("gpio get OK %p\n", t);
-    ret = gpiod_direction_output(t, 1);  //direction, initial value.
+    pr_info("gpio's get OK: %p %p\n", gpio_a, gpio_b);
+    ret = gpiod_direction_output(gpio_a, 1);  //direction, initial value.
+    if(ret) pr_err("?Err gpiod_direction_output gpio_a\n");
+    ret = gpiod_direction_output(gpio_b, 1);  //direction, initial value.
+    if(ret) pr_err("?Err gpiod_direction_output gpio_b\n");
   }
-
+  return ret;
 }
 
-void mark0(void){
-  if (!t) SetupGpio();
-  gpiod_set_value(t, 0);
-
+void markA0(void){
+  if (!gpio_a) SetupGpio();
+  gpiod_set_value(gpio_a, 0);
 }
 
-void mark1(void){
-  if (!t) SetupGpio();
-  gpiod_set_value(t, 1);
+void markA1(void){
+  if (!gpio_a) SetupGpio();
+  gpiod_set_value(gpio_a, 1);
+}
 
+void markB0(void){
+  if (!gpio_b) SetupGpio();
+  gpiod_set_value(gpio_b, 0);
+}
+
+void markB1(void){
+  if (!gpio_b) SetupGpio();
+  gpiod_set_value(gpio_b, 1);
 }
 
 //===
+
 //=== Фрагмент 2
 
 #include <asm/io.h>  //ioremap
 
-static volatile u32 *gpio_dr = NULL;
+//Регистры контроллера. gpio_dr_a[0]=GPIO1_DR, gpio_dr_a[1]=GPIO1_GDIR (направление, 1=output).
+static volatile u32 *gpio_dr_a = NULL;
+static volatile u32 *gpio_dr_b = NULL;
 
 //Маска
-#define GPIO12 (1<<12)
+#define GPIOA (1<<11)
+#define GPIOB (1<<12)
+#define OK 0
 
-int SetupGpioReg(void)
+static int SetupGpioReg(void)
 {
-  if(gpio_dr == NULL) {
-    gpio_dr = ioremap(0x20A8000, 4);
-    if(gpio_dr != NULL) {
-      pr_info("Remapped %p\n", gpio_dr);
-      return -EIO;
+  int ret= OK;
+  if(gpio_dr_a == NULL) {
+    gpio_dr_a = ioremap(0x209C000, 8);  //GPIO1, 4 bytes. imx proc ref p.1141.
+    gpio_dr_b = ioremap(0x20A8000, 8);  //GPIO4, 4 bytes.
+    if(gpio_dr_a != NULL) {
+      pr_info("Remapped A %p\n", gpio_dr_a);
+      ret = OK;
     } else {
-      pr_err("Failed remap.\n");
-      return OK;
+      pr_err("Failed remap A.\n");
+      ret = -EIO;
     }
-  
+    if(ret) return ret;
+
+    if (gpio_dr_b != NULL) {
+      pr_info("Remapped B %p\n", gpio_dr_b);
+      ret = OK;
+    } else {
+      pr_err("Failed remap B.\n");
+      ret = -EIO;
+    }
+    gpio_dr_a[1] |= GPIOA;  //output direction
+    gpio_dr_b[1] |= GPIOB;  //output.
+
   }
-  return OK;
+  return ret;
 }
 
-void unSetupGpio(void) {
-  if(gpio_dr) iounmap(gpio_dr);
+static void unSetupGpio(void) {
+  if (gpio_dr_a) iounmap(gpio_dr_a);
+  if (gpio_dr_b) iounmap(gpio_dr_b);
 }
 
-void mark0Reg(void) 
+static void mark0RegA(void)
 {
+  if (!gpio_dr_a) SetupGpioReg();
   //Будем быстрее чем writel.
-  *gpio_dr = (*gpio_dr) & ~GPIO12;
+  *gpio_dr_a = (*gpio_dr_a) & ~GPIOA;
 }
 
-void mark1Reg(void)
+static void mark1RegA(void)
 {
+  if (!gpio_dr_a) SetupGpioReg();
   //Будем быстрее чем writel.
-  *gpio_dr = (*gpio_dr) | GPIO12;
+  *gpio_dr_a = (*gpio_dr_a) | GPIOA;
+}
+static void mark0RegB(void)
+{
+  if (!gpio_dr_b) SetupGpioReg();
+  //Будем быстрее чем writel.
+  *gpio_dr_b = (*gpio_dr_b) & ~GPIOB;
+}
+
+static void mark1RegB(void)
+{
+  if (!gpio_dr_b) SetupGpioReg();
+  //Будем быстрее чем writel.
+  *gpio_dr_b = (*gpio_dr_b) | GPIOB;
 }
 
 //===
+
+void markA1writel(void){
+  u32 val;
+  if (!gpio_dr_b) SetupGpioReg();
+  val = readl(gpio_dr_a);
+  writel(val | GPIOA, gpio_dr_a);
+}
+
+void markA0writel(void){
+  u32 val;
+  if (!gpio_dr_a) SetupGpioReg();
+  val = readl(gpio_dr_a);
+  writel(val & ~GPIOA, gpio_dr_a);
+}
+void markB1writel(void){
+  u32 val;
+  if (!gpio_dr_b) SetupGpioReg();
+  val = readl(gpio_dr_b);
+  writel(val | GPIOB, gpio_dr_b);
+}
+
+void markB0writel(void){
+  u32 val;
+  if (!gpio_dr_b) SetupGpioReg();
+  val = readl(gpio_dr_b);
+  writel(val & ~GPIOB, gpio_dr_b);
+}
+
 
 static int delayh=10, delayl=10, niter=100000;  //Задержка высокого уровня, низкого уровня, число итераций цикла.
 module_param(delayh, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
@@ -196,62 +267,107 @@ static int m_init(void)
 
   pr_info("SetupGpio()\n");
 
-  SetupGpio();
-  SetupGpioReg();
+  if(SetupGpio()) {
+    pr_err("?Err SetupGpio\n");
+    return -EIO;
+  }
+  if(SetupGpioReg()) {
+    pr_err("?Err SetupGpioReg\n");
+    return -EIO;
+  }
 
-  msleep(20);
+  for(i=0; i<3; i++){
+    udelay(20);
+  
+    mark0RegB();
+    mark1RegB();
+
+    markA0();
+    markA1();
+
+    mark0RegB();
+    mark1RegB();
+
+    udelay(20);
+  }
+
+#if 0
 
   t1= ktime_get_ns();
   //local_irq_save(flags);
   for (i = 0; i < niter; i++){
-    mark1();
+    markB1();
     udelay(delayh);
-    mark0();
+    markB0();
     udelay(delayl);
   }
   //local_irq_restore(flags);
   t2 = ktime_get_ns();
   v = (unsigned)div_u64(t2 - t1, niter) / 2;
-  pr_info("giod_set_value + delay. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+  pr_info("gpiod_set_value + delay. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
 
   t1 = ktime_get_ns();
   //local_irq_save(flags);
   for (i = 0; i < niter; i++){
-    mark1Reg();
+    mark1RegB();
     udelay(delayh);
-    mark0Reg();
+    mark0RegB();
     udelay(delayl);
   }
   //local_irq_restore(flags);
   t2 = ktime_get_ns();
   v = (unsigned)div_u64(t2 - t1, niter) / 2;
-  pr_info("gio reg + delay. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+  pr_info("Reg + delay. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
 
   t1 = ktime_get_ns();
   //local_irq_save(flags);
   for (i = 0; i < niter; i++){
-    mark1();
-    mark0();
-    mark1();
-    mark0();
+    //mark1RegB();
+    gpiod_set_value_nocheck(gpio_a, 0);
+    //mark0RegB();
+    gpiod_set_value_nocheck(gpio_a, 1);
   }
   //local_irq_restore(flags);
   t2 = ktime_get_ns();
-  v = (unsigned)div_u64(t2 - t1, niter) / 4;
-  pr_info("giod_set_value. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+  v = (unsigned)div_u64(t2 - t1, niter) / 2;
+  pr_info("gpiod_set_value_nocheck  niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+
+#endif
 
   t1 = ktime_get_ns();
   //local_irq_save(flags);
   for (i = 0; i < niter; i++){
-    mark1Reg();
-    mark0Reg();
-    mark1Reg();
-    mark0Reg();
+    markA1();
+    markA0();
+    markA1();
+    markA0();
   }
   //local_irq_restore(flags);
   t2 = ktime_get_ns();
   v = (unsigned)div_u64(t2 - t1, niter) / 4;
-  pr_info("giod reg. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+  pr_info("gpiod_set_value. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+
+  t1 = ktime_get_ns();
+  for (i = 0; i < niter; i++){
+    markA1writel();
+    markA0writel();
+  }
+  t2 = ktime_get_ns();
+  v = (unsigned)div_u64(t2 - t1, niter) / 2;
+  pr_info("writel, niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
+
+  t1 = ktime_get_ns();
+  //local_irq_save(flags);
+  for (i = 0; i < niter; i++){
+    mark1RegA();
+    mark0RegA();
+    mark1RegA();
+    mark0RegA();
+  }
+  //local_irq_restore(flags);
+  t2 = ktime_get_ns();
+  v = (unsigned)div_u64(t2 - t1, niter) / 4;
+  pr_info("Reg. niter %d, t1 %llx, t2 %llx, result %d\n", niter, t1, t2, v);
 
 
   t1 = ktime_get_ns();
@@ -267,6 +383,7 @@ static int m_init(void)
   v = (unsigned)div_u64(t2 - t1, niter);
   pr_info("Integer operations. niter %d, t1 %llx, t2 %llx, result [ns/1000] %d\n", niter, t1, t2, v);
 
+  unSetupGpio();
 
   return OK;
 }

@@ -1,0 +1,17 @@
+*.sdf
+*.old
+*.suo
+*.opensdf
+*.ncb
+*.suo
+*.orig
+*.vgdbsettings.ivz.user
+*.vcxproj.user
+
+*.*.cmd
+*.o
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers

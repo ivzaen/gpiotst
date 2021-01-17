@@ -20,6 +20,7 @@ CROSS_COMPILE=$CROSS
 #или здесь, если не задан на момент запуска.
 
 KERNPATH ?= ~/rep/linux-wk
+#KERNPATH ?= ~/my/ramd/linux-wk
 #KERNPATH ?= ~/rep/wiren/linux
 #KERNPATH ?= ~/rep/wiren/linux_merge_wiren
 
