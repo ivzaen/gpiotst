@@ -13,4 +13,4 @@ set -x
 TMPF=`mktemp`
 echo $1 > $TMPF
 psftp $TARGET $TPORT -l $TUSER -i $TKEY -be -b $TMPF
-rm $TMPF
+#rm $TMPF  #Not doing, hides return code. /tmp is cleared on restart.

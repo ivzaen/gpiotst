@@ -214,6 +214,7 @@ static struct miscdevice mydev = {
   MISC_DYNAMIC_MINOR, DEVICENAME, &fops
 };
 #endif
+//=== Взято из w1_therm.c
 
 /**
  * w1_DS18B20_convert_temp() - temperature computation for DS18B20
@@ -225,25 +226,25 @@ static struct miscdevice mydev = {
  */
 static inline int w1_DS18B20_convert_temp(u8 rom[9])
 {
-	int t;
-	u32 bv;
+	u16 bv;
+	s16 t;
+
+	/* Signed 16-bit value to unsigned, cpu order */
+	bv = le16_to_cpup((__le16 *)rom);
 
 	/* Config register bit R2 = 1 - GX20MH01 in 13 or 14 bit resolution mode */
 	if (rom[4] & 0x80) {
-		/* Signed 16-bit value to unsigned, cpu order */
-		bv = le16_to_cpup((__le16 *)rom);
-
 		/* Insert two temperature bits from config register */
 		/* Avoid arithmetic shift of signed value */
 		bv = (bv << 2) | (rom[4] & 3);
-
-		t = (int) sign_extend32(bv, 17); /* Degrees, lowest bit is 2^-6 */
-		return (t*1000)/64;  /* Millidegrees */
+		t = (s16) bv;	/* Degrees, lowest bit is 2^-6 */
+		return (int)t * 1000 / 64;	/* Sign-extend to int; millidegrees */
 	}
-
-	t = (int)le16_to_cpup((__le16 *)rom);
-	return t*1000/16;
+	t = (s16)bv;	/* Degrees, lowest bit is 2^-4 */
+	return (int)t * 1000 / 16;	/* Sign-extend to int; millidegrees */
 }
+
+//===
 
 struct testram {
 	u8 ram[9];  //scratchpad ram
@@ -252,21 +253,44 @@ struct testram {
 
 static int m_init(void)
 {
-        #define N 8
+        #define N 20
 	struct testram tram[N] = {
+		//DS18B20. Младший бит дает 2^-4 *1000 = 62.5 миллиградусов.
+		//Чтобы посчитать выходное значение темп-ры, умножаем число в битах (от любого бита до 2^-4 включительно) на миллиградусы одного бита. 2^-4*1000* <биты>
 		{ { 0xD0, 0x7, 0, 0, 0, 0, 0, 0, 0 }, 125000 },
 		{ { 0x50, 0x05, 0, 0, 0, 0, 0, 0, 0 }, 85000 },
 		{ { 0x91, 0x01, 0, 0, 0, 0, 0, 0, 0 }, 25062 },
+		{ { 0xA2, 0x00, 0, 0, 0, 0, 0, 0, 0 }, 10125 },
 		{ { 0x8, 0x0, 0, 0, 0, 0, 0, 0, 0 }, 500 },
+		{ { 0x0, 0x0, 0, 0, 0, 0, 0, 0, 0 }, 0 },
 	        { { 0xF8, 0xFF, 0, 0, 0, 0, 0, 0, 0 }, -500 },
 		{ { 0x5E, 0xFF, 0, 0, 0, 0, 0, 0, 0 }, -10125 },
 		{ { 0x6F, 0xFE, 0, 0, 0, 0, 0, 0, 0 }, -25062 },
-		{ { 0x90, 0xFC, 0, 0, 0, 0, 0, 0, 0 }, -55000 }
+		{ { 0x90, 0xFC, 0, 0, 0, 0, 0, 0, 0 }, -55000 },
+		//GX20MH01. Младший бит дает 2^-6 *1000 = 15.625 миллиградусов.
+		//Чтобы включить расчет по типу GX20MH01, ставим rom[4]|=0x80.
+		{ { 0xD0, 0x7, 0, 0, 0x83, 0, 0, 0, 0 }, 125046 },
+		{ { 0x50, 0x05, 0, 0, 0x82, 0, 0, 0, 0 }, 85031 },  //Формула для проверки  ((0x550<<2) +2) *2^-6*1000
+		{ { 0x91, 0x01, 0, 0, 0x81, 0, 0, 0, 0 }, 25078 },
+		{ { 0xA2, 0x00, 0, 0, 0x80, 0, 0, 0, 0 }, 10125 },
+		{ { 0x8, 0x0, 0, 0, 0x83, 0, 0, 0, 0 }, 546 },
+		{ { 0x0, 0x0, 0, 0, 0x82, 0, 0, 0, 0 }, 31 },
+	        { { 0xF8, 0xFF, 0, 0, 0x83, 0, 0, 0, 0 }, -453 },	// ((0xFFF8<<2) +3 - 0x40000)*2^-6*1000
+		{ { 0x5E, 0xFF, 0, 0, 0x80, 0, 0, 0, 0 }, -10125 },	// ((0xFFF8<<2) +3 - 0x40000)*2^-6*1000
+		{ { 0x6F, 0xFE, 0, 0, 0x81, 0, 0, 0, 0 }, -25046 },	// ((0xFE6F<<2) +1 - 0x40000)*2^-6*1000
+		{ { 0x90, 0xFC, 0, 0, 0x82, 0, 0, 0, 0 }, -54968 }	// ((0xFC90<<2) +2 - 0x40000)*2^-6*1000
+
 	};
+	const char msgfail[]= "FAIL!";
+	const char msgok[]= "ok";
 	int i, v;
 	for(i=0; i<N; i++){
 		v = w1_DS18B20_convert_temp(tram[i].ram);
-		pr_info("conv i=%d temp=%d conv_temp=%d\n", i, tram[i].temp, v);
+		{
+			const char *msg= tram[i].temp == v ? msgok : msgfail;
+			pr_info("conv i=%d mustbe_temp=%d temp=%d - %s", i, tram[i].temp, v, msg);
+		}
+
 	}
 
 

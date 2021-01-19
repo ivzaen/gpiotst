@@ -8,4 +8,7 @@ echo BRD=$BRD
 #Для скриптов отправки надо TARGET=wb5 если wb2.
 export TARGET=$TARGET
 
-try ./sftp2.sh "put gpiotst.ko /root/gpiotst.ko"
+try ./sftp2.sh "put gpiotst.ko /root/gpiotst.ko \n
+put gpiotst.sh"
+
+try ./plink2.sh "chmod +x gpiotst.sh"
